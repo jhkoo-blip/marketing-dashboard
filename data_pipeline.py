@@ -55,6 +55,19 @@ def _read_csvs(paths: list[str]) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def _read_uploaded_csvs(files: list) -> pd.DataFrame:
+    """st.file_uploader가 반환한 UploadedFile 목록을 읽어 하나로 합친다."""
+    frames = []
+    for file in files:
+        file.seek(0)
+        df = pd.read_csv(file)
+        df["__source_file"] = file.name
+        frames.append(df)
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
 def load_channel_data(base_folder: str) -> pd.DataFrame:
     """<base_folder>/channel/ 안의 일별 CSV 전부를 읽어 하나로 합친다."""
     paths = sorted(glob.glob(os.path.join(base_folder, "channel", "*.csv")))
@@ -139,5 +152,25 @@ def build_dataset(base_folder: str, _fingerprint: str) -> pd.DataFrame:
     """
     channel_df = load_channel_data(base_folder)
     af_df = load_appsflyer_data(base_folder)
+    merged = merge_channel_appsflyer(channel_df, af_df)
+    return compute_metrics(merged)
+
+
+def build_dataset_from_files(channel_files: list, af_files: list, _fingerprint: str) -> pd.DataFrame:
+    """업로드된 채널/AppsFlyer CSV 파일 목록으로 조인 + 파생지표 계산까지 완료한 데이터셋 반환.
+
+    _fingerprint는 캐시 무효화 트리거 용도로만 쓰인다.
+    """
+    channel_df = _read_uploaded_csvs(channel_files)
+    if not channel_df.empty:
+        channel_df = channel_df.rename(columns={"일": "date"})
+        channel_df["date"] = pd.to_datetime(channel_df["date"])
+
+    af_df = _read_uploaded_csvs(af_files)
+    if not af_df.empty:
+        af_df = af_df.rename(columns={"일": "date"})
+        af_df["date"] = pd.to_datetime(af_df["date"])
+        af_df["채널"] = af_df["미디어소스"].map(MEDIA_SOURCE_TO_CHANNEL).fillna(af_df["미디어소스"])
+
     merged = merge_channel_appsflyer(channel_df, af_df)
     return compute_metrics(merged)

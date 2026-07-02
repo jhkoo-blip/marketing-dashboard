@@ -9,13 +9,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import altair as alt
 import pandas as pd
 
 import streamlit as st
-from data_pipeline import build_dataset, get_folder_fingerprint
+from data_pipeline import build_dataset_from_files
+
+CHART_HEIGHT = 300
 
 st.set_page_config(
     page_title="채널 x AppsFlyer 대시보드",
@@ -23,41 +23,36 @@ st.set_page_config(
     layout="wide",
 )
 
-DEFAULT_FOLDER = str(Path(__file__).parent / "data")
-CHART_HEIGHT = 300
-
 
 @st.cache_data(ttl=600, show_spinner="데이터 로딩 및 조인 중...")
-def load_data(folder: str, fingerprint: str) -> pd.DataFrame:
-    return build_dataset(folder, fingerprint)
+def load_data(channel_files: list, af_files: list, fingerprint: str) -> pd.DataFrame:
+    return build_dataset_from_files(channel_files, af_files, fingerprint)
 
 
 # =============================================================================
-# 사이드바: 데이터 소스 + 필터
+# 사이드바: 데이터 업로드 + 필터
 # =============================================================================
 
 with st.sidebar:
-    st.markdown("### :material/folder: 데이터 폴더")
-    folder = st.text_input(
-        "상위 폴더 (하위에 channel/, appsflyer/ 필요)",
-        value=st.session_state.get("data_folder", DEFAULT_FOLDER),
+    st.markdown("### :material/upload_file: 데이터 업로드")
+    channel_uploads = st.file_uploader(
+        "채널 리포트 CSV (여러 개 선택 가능)", type="csv", accept_multiple_files=True
     )
-    st.session_state["data_folder"] = folder
-    st.caption(f":material/folder_open: `{folder}\\channel\\YYYY-MM-DD.csv`")
-    st.caption(f":material/folder_open: `{folder}\\appsflyer\\YYYY-MM-DD.csv`")
+    af_uploads = st.file_uploader(
+        "AppsFlyer 리포트 CSV (여러 개 선택 가능)", type="csv", accept_multiple_files=True
+    )
 
-    if st.button(":material/refresh: 새로고침 (폴더 재스캔)", width="stretch"):
-        st.cache_data.clear()
-        st.rerun()
+if not channel_uploads and not af_uploads:
+    st.info("사이드바에서 채널 리포트 / AppsFlyer 리포트 CSV 파일을 업로드해주세요.")
+    st.stop()
 
-fingerprint = get_folder_fingerprint(folder)
-df = load_data(folder, fingerprint)
+fingerprint = "|".join(
+    f"{f.name}:{f.size}" for f in list(channel_uploads or []) + list(af_uploads or [])
+)
+df = load_data(channel_uploads or [], af_uploads or [], fingerprint)
 
 if df.empty:
-    st.warning(
-        f"'{folder}\\channel\\' 및 '{folder}\\appsflyer\\' 폴더에서 CSV 파일을 찾지 못했습니다. "
-        "폴더 경로와 하위 폴더 구조를 확인해주세요."
-    )
+    st.warning("업로드한 CSV에서 유효한 데이터를 찾지 못했습니다. 파일 형식을 확인해주세요.")
     st.stop()
 
 with st.sidebar:
@@ -101,7 +96,7 @@ if creatives:
 fdf = df[mask].copy()
 
 st.markdown("# :material/monitoring: 채널 x AppsFlyer 대시보드")
-st.caption(f"데이터 폴더: `{folder}` · 최근 스캔 기준 {len(df):,}행 중 {len(fdf):,}행 표시 중")
+st.caption(f"업로드된 파일 {len(channel_uploads or []) + len(af_uploads or [])}개 · {len(df):,}행 중 {len(fdf):,}행 표시 중")
 
 if fdf.empty:
     st.info("선택한 필터에 해당하는 데이터가 없습니다.")
